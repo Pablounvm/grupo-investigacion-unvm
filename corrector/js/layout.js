@@ -59,7 +59,8 @@ function paginate(items, cap) {
   return cols;
 }
 
-export function buildLayout(items) {
+export function buildLayout(allItems) {
+  const items = allItems.filter((it) => !it.skip);
   if (!items.length) throw new Error('El examen no tiene ítems.');
   let cols;
   for (let n = 1; n <= 4; n++) {
@@ -110,6 +111,7 @@ export function buildLayout(items) {
 //   12.1  abcde  ac  1       (dos respuestas correctas)
 //   15a   VF     V   1
 //   Carrera  12  -           ('-' = sin clave: se registra pero no puntúa)
+//   10    -                  (fila de la tabla que no se corrige, p. ej. desarrollo)
 // Líneas vacías y las que empiezan con # se ignoran.
 
 export function parseExam(text) {
@@ -121,6 +123,11 @@ export function parseExam(text) {
     const parts = line.split(/\s+/);
     if (parts.length < 2) { errors.push(`Línea ${n + 1}: faltan las opciones.`); return; }
     const [label, opts, key = '-', pts] = parts;
+    if (opts === '-') {
+      // Fila que existe en la tabla impresa pero no se corrige (p. ej. desarrollo).
+      items.push({ label: label.slice(0, 6), opts: '', key: '', points: 0, skip: true });
+      return;
+    }
     if (opts.length < 2 || opts.length > MAX_OPTS || new Set(opts).size !== opts.length) {
       errors.push(`Línea ${n + 1}: opciones "${opts}" inválidas (2 a ${MAX_OPTS} letras distintas).`); return;
     }
@@ -137,5 +144,5 @@ export function parseExam(text) {
 }
 
 export function examToText(items) {
-  return items.map((it) => `${it.label}\t${it.opts}\t${it.key || '-'}\t${it.points}`).join('\n');
+  return items.map((it) => (it.skip ? `${it.label}\t-` : `${it.label}\t${it.opts}\t${it.key || '-'}\t${it.points}`)).join('\n');
 }

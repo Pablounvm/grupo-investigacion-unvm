@@ -2,11 +2,14 @@
 import { parseExam, examToText, MAX_ITEMS } from './layout.js';
 import { sheetSVG } from './sheet.js';
 import { readSheet, OMRError, PX_PER_MM } from './omr.js';
+import { readTableSheet } from './table.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_EXAM = 'corrector.v1.exam';
 const STORE_RESULTS = 'corrector.v1.results';
 const MAX_PHOTO_SIDE = 1600;
+const LIVE_SIDE = 1400; // resolución de análisis de la cámara en vivo
+const LIVE_CONFIRM = 2; // lecturas idénticas seguidas para aceptar
 
 // ---------- Almacenamiento local (puede fallar en modo privado) ----------
 function load(key, fallback) {
@@ -28,18 +31,21 @@ function save(key, value) {
 
 const DEFAULT_EXAM = {
   title: '',
+  format: 'table',
   text: examToText(Array.from({ length: 10 }, (_, i) => ({ label: String(i + 1), opts: 'abcd', key: '', points: 1 }))),
   partial: false,
   penalty: 0,
 };
 
-let exam = load(STORE_EXAM, DEFAULT_EXAM);
-let items = parseExam(exam.text).items;
+let exam = { ...DEFAULT_EXAM, ...load(STORE_EXAM, {}) };
+let rows = parseExam(exam.text).items; // filas en el orden de la hoja (incluye las de desarrollo)
+let items = rows.filter((r) => !r.skip); // ítems que se corrigen
 let results = load(STORE_RESULTS, []);
 let current = null; // corrección en curso
 
 // ---------- Pestañas ----------
 function showTab(name) {
+  if (name !== 'scan') stopLive();
   document.querySelectorAll('[role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
   document.querySelectorAll('.tab').forEach((s) => (s.hidden = s.id !== `tab-${name}`));
   if (name === 'sheet') renderSheet();
@@ -53,6 +59,7 @@ function fillExamForm() {
   $('exam-key').value = exam.text;
   $('multi-partial').checked = !!exam.partial;
   $('penalty').value = exam.penalty || 0;
+  document.querySelectorAll('input[name=format]').forEach((r) => (r.checked = r.value === exam.format));
 }
 
 $('gen-btn').addEventListener('click', () => {
@@ -64,34 +71,37 @@ $('gen-btn').addEventListener('click', () => {
 $('exam-save').addEventListener('click', () => {
   const parsed = parseExam($('exam-key').value);
   const err = $('exam-errors');
-  if (parsed.errors.length) {
-    err.textContent = parsed.errors.join(' ');
+  const format = document.querySelector('input[name=format]:checked')?.value || 'table';
+  const errors = [...parsed.errors];
+  if (format === 'table' && parsed.items.some((it) => it.opts.length > 5)) errors.push('La tabla impresa admite hasta 5 opciones (a–e).');
+  if (errors.length) {
+    err.textContent = errors.join(' ');
     err.hidden = false;
     $('exam-status').hidden = true;
     return;
   }
   err.hidden = true;
-  const layoutChanged = examToText(parsed.items.map((it) => ({ ...it, key: '', points: 0 }))) !==
-    examToText(items.map((it) => ({ ...it, key: '', points: 0 })));
   exam = {
     title: $('exam-title').value.trim(),
+    format,
     text: $('exam-key').value,
     partial: $('multi-partial').checked,
     penalty: Math.max(0, Number($('penalty').value) || 0),
   };
-  items = parsed.items;
+  rows = parsed.items;
+  items = rows.filter((r) => !r.skip);
   const stored = save(STORE_EXAM, exam);
   const noKey = items.filter((it) => !it.key).length;
   const max = items.reduce((s, it) => s + (it.key ? it.points : 0), 0);
   $('exam-status').textContent =
     `${stored ? 'Guardado' : 'Aplicado (no se pudo guardar en el dispositivo)'}: ${items.length} ítems, máximo ${fmt(max)} puntos` +
-    (noKey ? `, ${noKey} sin clave.` : '.') +
-    (layoutChanged ? ' La hoja cambió: volvé a imprimirla.' : '');
+    (noKey ? `, ${noKey} sin clave.` : '.');
   $('exam-status').hidden = false;
 });
 
 // ---------- 2. Hoja ----------
 function renderSheet() {
+  $('sheet-table-note').hidden = exam.format !== 'table';
   const svg = sheetSVG({ title: exam.title, items });
   $('sheet-preview').innerHTML = svg;
   $('print-area').innerHTML = svg;
@@ -106,15 +116,52 @@ $('sheet-download').addEventListener('click', () => {
 });
 
 // ---------- 3. Corregir ----------
-async function photoToImageData(file) {
-  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  const k = Math.min(1, MAX_PHOTO_SIDE / Math.max(bmp.width, bmp.height));
-  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+
+// Lee una imagen y la lleva a un modelo común de revisión:
+// imagen (gris) + para cada ítem, el polígono de cada opción y lo leído.
+function analyze(imageData) {
+  if (exam.format === 'table') {
+    const out = readTableSheet(imageData, rows);
+    const res = out.results.filter((r) => !r.skip);
+    return {
+      image: out.img,
+      quads: res.map((r) => r.quads),
+      read: res.map((r) => ({ marked: [...r.marked], status: r.status })),
+    };
+  }
+  const out = readSheet(imageData, items);
+  const R = PX_PER_MM, h = out.layout.roi;
+  return {
+    image: out.rect,
+    quads: out.layout.questions.map((q) =>
+      q.cells.map((c) => [[(c.x - h) * R, (c.y - h) * R], [(c.x + h) * R, (c.y - h) * R], [(c.x + h) * R, (c.y + h) * R], [(c.x - h) * R, (c.y + h) * R]])
+    ),
+    read: out.results.map((r) => ({ marked: [...r.marked], status: r.status })),
+  };
+}
+
+function showReview(a) {
+  current = { ...a, answers: a.read.map((r) => [...r.marked]), touched: new Set() };
+  $('student-name').value = '';
+  $('student-id').value = '';
+  $('review').hidden = false;
+  drawReview();
+  $('review').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showError(e) {
+  $('scan-error').textContent = e instanceof OMRError ? e.message : `No se pudo procesar la imagen (${e.message}).`;
+  $('scan-error').hidden = false;
+  if (!(e instanceof OMRError)) console.error(e);
+}
+
+function frameData(source, sw, sh, maxSide) {
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.round(sw * k), h = Math.round(sh * k);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(bmp, 0, 0, w, h);
-  bmp.close?.();
+  ctx.drawImage(source, 0, 0, w, h);
   return ctx.getImageData(0, 0, w, h);
 }
 
@@ -122,35 +169,96 @@ async function onPhoto(ev) {
   const file = ev.target.files?.[0];
   ev.target.value = '';
   if (!file) return;
+  stopLive();
   $('scan-error').hidden = true;
   $('review').hidden = true;
   $('scan-busy').hidden = false;
   await new Promise((r) => setTimeout(r, 30)); // deja pintar "Procesando…"
   try {
-    const img = await photoToImageData(file);
-    const out = readSheet(img, items);
-    current = {
-      rect: out.rect,
-      layout: out.layout,
-      read: out.results.map((r) => ({ marked: [...r.marked], doubtful: [...r.doubtful], status: r.status })),
-      answers: out.results.map((r) => [...r.marked]),
-      touched: new Set(),
-    };
-    $('student-name').value = '';
-    $('student-id').value = '';
-    $('review').hidden = false;
-    drawReview();
-    $('review').scrollIntoView({ behavior: 'smooth' });
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const img = frameData(bmp, bmp.width, bmp.height, MAX_PHOTO_SIDE);
+    bmp.close?.();
+    showReview(analyze(img));
   } catch (e) {
-    $('scan-error').textContent = e instanceof OMRError ? e.message : `No se pudo procesar la imagen (${e.message}).`;
-    $('scan-error').hidden = false;
-    if (!(e instanceof OMRError)) console.error(e);
+    showError(e);
   } finally {
     $('scan-busy').hidden = true;
   }
 }
 $('scan-input').addEventListener('change', onPhoto);
 $('scan-gallery').addEventListener('change', onPhoto);
+
+// --- Cámara en vivo: analiza cuadros hasta obtener la misma lectura dos veces seguidas.
+let live = null;
+
+async function startLive() {
+  $('scan-error').hidden = true;
+  $('review').hidden = true;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showError(new OMRError('Este navegador no permite usar la cámara en vivo. Usá «sacar una foto».'));
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    });
+    const video = $('live-video');
+    video.srcObject = stream;
+    await video.play();
+    live = { stream, last: null, same: 0, timer: 0 };
+    $('live').hidden = false;
+    $('live-start').hidden = true;
+    setStatus('Buscando la tabla…', false);
+    live.timer = setTimeout(liveTick, 300);
+  } catch (e) {
+    showError(new OMRError(`No se pudo abrir la cámara (${e.name === 'NotAllowedError' ? 'permiso denegado' : e.message}).`));
+  }
+}
+
+function stopLive() {
+  if (!live) return;
+  clearTimeout(live.timer);
+  live.stream.getTracks().forEach((t) => t.stop());
+  $('live-video').srcObject = null;
+  live = null;
+  $('live').hidden = true;
+  $('live-start').hidden = false;
+}
+
+function setStatus(text, found) {
+  $('live-status').textContent = text;
+  $('live-status').className = 'live-status' + (found ? ' found' : '');
+}
+
+function liveTick() {
+  if (!live) return;
+  const video = $('live-video');
+  if (video.videoWidth) {
+    try {
+      const a = analyze(frameData(video, video.videoWidth, video.videoHeight, LIVE_SIDE));
+      const sig = a.read.map((r) => r.marked.join('') + r.status[0]).join('|');
+      live.same = sig === live.last ? live.same + 1 : 1;
+      live.last = sig;
+      if (live.same >= LIVE_CONFIRM) {
+        stopLive();
+        showReview(a);
+        return;
+      }
+      setStatus('Tabla detectada · mantené quieto el celular…', true);
+    } catch (e) {
+      live.same = 0;
+      live.last = null;
+      setStatus(e instanceof OMRError ? e.message : 'Buscando la tabla…', false);
+      if (!(e instanceof OMRError)) console.error(e);
+    }
+  }
+  live.timer = setTimeout(liveTick, 150);
+}
+
+$('live-start').addEventListener('click', startLive);
+$('live-stop').addEventListener('click', stopLive);
+document.addEventListener('visibilitychange', () => document.hidden && stopLive());
 
 // Puntaje de un ítem. Devuelve null si el ítem no tiene clave.
 function itemScore(it, ans) {
@@ -182,39 +290,52 @@ function pendingReview() {
 
 const COLORS = { ok: '#1a9850', bad: '#d73027', rev: '#f39c12', key: '#2166ac', blank: '#888' };
 
+function poly(ctx, q, grow = 0) {
+  const cx = (q[0][0] + q[2][0]) / 2, cy = (q[0][1] + q[2][1]) / 2;
+  ctx.beginPath();
+  q.forEach(([x, y], i) => {
+    const d = Math.hypot(x - cx, y - cy) || 1;
+    const X = x + ((x - cx) / d) * grow, Y = y + ((y - cy) / d) * grow;
+    if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+  });
+  ctx.closePath();
+}
+
 function drawReview() {
-  const { rect, layout } = current;
+  const { image } = current;
   const cv = $('review-canvas');
-  cv.width = rect.w; cv.height = rect.h;
+  cv.width = image.w; cv.height = image.h;
   const ctx = cv.getContext('2d');
-  const id = ctx.createImageData(rect.w, rect.h);
-  for (let i = 0; i < rect.g.length; i++) {
-    id.data[4 * i] = id.data[4 * i + 1] = id.data[4 * i + 2] = rect.g[i];
+  const id = ctx.createImageData(image.w, image.h);
+  for (let i = 0; i < image.g.length; i++) {
+    id.data[4 * i] = id.data[4 * i + 1] = id.data[4 * i + 2] = image.g[i];
     id.data[4 * i + 3] = 255;
   }
   ctx.putImageData(id, 0, 0);
-  const R = PX_PER_MM, b = layout.box * R, h = layout.roi * R;
+  const lw = Math.max(2, image.w / 400);
 
   const list = [];
-  layout.questions.forEach((q, i) => {
-    const it = items[i], ans = current.answers[i];
+  items.forEach((it, i) => {
+    const quads = current.quads[i], ans = current.answers[i];
     const s = itemScore(it, ans);
     const review = current.read[i].status === 'review' && !current.touched.has(i);
-    q.cells.forEach((c, k) => {
-      const x = c.x * R, y = c.y * R;
-      if (it.key.includes(it.opts[k])) {
-        ctx.strokeStyle = COLORS.key; ctx.lineWidth = 2;
-        ctx.strokeRect(x - b / 2 - 3, y - b / 2 - 3, b + 6, b + 6);
-      }
+    quads.forEach((q, k) => {
       if (ans.includes(k)) {
         ctx.fillStyle = (s === null ? COLORS.blank : s >= it.points ? COLORS.ok : COLORS.bad) + '66';
-        ctx.fillRect(x - h, y - h, 2 * h, 2 * h);
+        poly(ctx, q);
+        ctx.fill();
+      }
+      if (it.key.includes(it.opts[k])) {
+        ctx.strokeStyle = COLORS.key; ctx.lineWidth = lw;
+        poly(ctx, q, -lw);
+        ctx.stroke();
       }
     });
     if (review) {
-      const first = q.cells[0], last = q.cells[q.cells.length - 1];
-      ctx.strokeStyle = COLORS.rev; ctx.lineWidth = 4;
-      ctx.strokeRect(first.x * R - h - 3, first.y * R - h - 3, (last.x - first.x) * R + 2 * h + 6, 2 * h + 6);
+      const first = quads[0], last = quads[quads.length - 1];
+      ctx.strokeStyle = COLORS.rev; ctx.lineWidth = 2 * lw;
+      poly(ctx, [first[0], last[1], last[2], first[3]], lw);
+      ctx.stroke();
       list.push(it.label);
     }
   });
@@ -226,21 +347,28 @@ function drawReview() {
   $('review-count').className = 'review-count' + (n ? ' pending' : '');
 }
 
+function inside(q, x, y) {
+  let c = false;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const [xi, yi] = q[i], [xj, yj] = q[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
 $('review-canvas').addEventListener('click', (ev) => {
   if (!current) return;
   const cv = ev.currentTarget, r = cv.getBoundingClientRect();
-  const x = ((ev.clientX - r.left) / r.width) * cv.width / PX_PER_MM;
-  const y = ((ev.clientY - r.top) / r.height) * cv.height / PX_PER_MM;
-  const L = current.layout;
-  L.questions.forEach((q, i) => {
-    q.cells.forEach((c, k) => {
-      if (Math.abs(c.x - x) <= L.roi && Math.abs(c.y - y) <= L.roi) {
-        const ans = current.answers[i];
-        const j = ans.indexOf(k);
-        if (j >= 0) ans.splice(j, 1); else ans.push(k);
-        ans.sort((a, b) => a - b);
-        current.touched.add(i);
-      }
+  const x = ((ev.clientX - r.left) / r.width) * cv.width;
+  const y = ((ev.clientY - r.top) / r.height) * cv.height;
+  current.quads.forEach((quads, i) => {
+    quads.forEach((q, k) => {
+      if (!inside(q, x, y)) return;
+      const ans = current.answers[i];
+      const j = ans.indexOf(k);
+      if (j >= 0) ans.splice(j, 1); else ans.push(k);
+      ans.sort((a, b) => a - b);
+      current.touched.add(i);
     });
   });
   drawReview();
@@ -270,8 +398,10 @@ $('save-result').addEventListener('click', () => {
 $('use-as-key').addEventListener('click', () => {
   if (!current) return;
   if (!confirm('¿Reemplazar la clave con las marcas de esta hoja?')) return;
-  items = items.map((it, i) => ({ ...it, key: current.answers[i].map((k) => it.opts[k]).join('') }));
-  exam.text = examToText(items);
+  let i = 0;
+  rows = rows.map((r) => (r.skip ? r : { ...r, key: current.answers[i++].map((k) => r.opts[k]).join('') }));
+  items = rows.filter((r) => !r.skip);
+  exam.text = examToText(rows);
   save(STORE_EXAM, exam);
   fillExamForm();
   drawReview();
@@ -322,11 +452,11 @@ function csvCell(v) {
 $('export-csv').addEventListener('click', () => {
   const labels = items.map((it) => it.label);
   const head = ['Estudiante', 'Legajo', 'Puntaje', 'Máximo', 'Porcentaje', 'Correcciones manuales', 'Fecha', ...labels];
-  const rows = results.map((r) => [
+  const rowsOut = results.map((r) => [
     r.name, r.id, fmt(r.score), fmt(r.max), r.max ? fmt((100 * r.score) / r.max) : '', r.edits, r.date.slice(0, 10),
     ...labels.map((l) => r.answers[l] ?? ''),
   ]);
-  const csv = '﻿' + [head, ...rows].map((row) => row.map(csvCell).join(';')).join('\r\n');
+  const csv = '﻿' + [head, ...rowsOut].map((row) => row.map(csvCell).join(';')).join('\r\n');
   download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `notas-${slug(exam.title || 'examen')}.csv`);
 });
 $('clear-results').addEventListener('click', () => {

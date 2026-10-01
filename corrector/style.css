@@ -1,3 +1,5 @@
+[hidden] { display: none !important; }
+
 :root {
   --bg: #f6f7f5;
   --fg: #1d1f1c;
@@ -115,3 +117,12 @@ table.results th { font-weight: 600; color: var(--muted); }
   .print-area { display: block; }
   .print-area svg { display: block; width: 210mm; height: 297mm; }
 }
+
+.row.center { justify-content: center; gap: 24px; }
+.live { position: relative; }
+.live video { display: block; width: 100%; border-radius: 10px; background: #000; }
+.live-status { text-align: center; font-weight: 600; }
+.live-status.found { color: var(--ok); }
+fieldset label { font-weight: 400; }
+input[type="radio"] { width: 20px; height: 20px; vertical-align: middle; margin-right: 6px; }
+button.big-button { width: 100%; }

@@ -1,7 +1,13 @@
 # Corrector de grillas
 
-App web instalable (PWA) que corrige hojas de respuestas de opción múltiple y V/F a partir de una foto del celular.
+App web instalable (PWA) que corrige hojas de respuestas de opción múltiple apuntando con la cámara del celular.
 Las marcas pueden ser **cruces (X), círculos, tildes o casilleros rellenos** hechos a mano con birome.
+
+Dos formatos de hoja:
+
+- **Tabla impresa propia** (p. ej. la hoja de Word del examen, columnas `N.º | a | b | c | d | e`): la app detecta
+  las líneas de la tabla, sin marcas especiales, aunque la foto esté torcida, en perspectiva o sin centrar.
+- **Hoja generada por la app**, con cuadrados de referencia en las esquinas (también admite V/F y hasta 6 opciones).
 
 ## Seguridad y privacidad
 
@@ -28,13 +34,27 @@ Las marcas pueden ser **cruces (X), círculos, tildes o casilleros rellenos** he
    2     abcd   a   1
    12.1  abcde  ac  1    ← dos respuestas correctas
    15a   VF     V   1
+   10    -             ← fila de la tabla que no se corrige (desarrollo)
    ```
-2. **Hoja:** imprimir la hoja de respuestas generada (A4). Tiene 4 cuadrados negros en las esquinas
+   Con **tabla impresa**, las filas van en el mismo orden que en la hoja: primero la tabla de la izquierda,
+   de arriba hacia abajo, después la de la derecha, incluidas las filas de desarrollo con `-`.
+2. **Hoja** (sólo si no usás tu propia tabla): imprimir la hoja de respuestas generada (A4). Tiene 4 cuadrados negros en las esquinas
    y uno chico de orientación: no taparlos ni recortarlos.
-3. **Corregir:** sacar la foto. La app muestra la hoja enderezada con las marcas coloreadas
+3. **Corregir:** tocar *Corregir con la cámara* y apuntar a la hoja: cuando lee lo mismo en dos cuadros
+   seguidos, se detiene sola. También se puede sacar una foto o elegirla de la galería. La app muestra la hoja enderezada con las marcas coloreadas
    (verde correcta, rojo incorrecta, naranja *a revisar*, recuadro azul = clave).
    Tocar un casillero corrige la lectura. Guardar y pasar a la siguiente.
 4. **Notas:** tabla de resultados y exportación a CSV (separador `;`, coma decimal, abre directo en Excel).
+
+## Cómo lee una tabla impresa
+
+1. Estima la inclinación de las líneas horizontales y verticales por separado y endereza la imagen
+   (corrige giro y el "trapecio" de una foto en perspectiva).
+2. Detecta las líneas con un filtro de cresta (responde a líneas finas aunque estén tenues o cortadas).
+3. Agrupa las líneas en tablas, descarta líneas espurias e interpola alguna faltante (filas de igual altura).
+4. Prueba las 4 orientaciones; la correcta es la que tiene los números de pregunta en la primera columna.
+5. En cada celda mide el oscurecimiento del 15 % de píxeles más oscuros respecto del papel de esa celda.
+   Si la cantidad de filas no coincide con la clave, **rechaza la foto** en vez de adivinar.
 
 ## Cómo decide
 

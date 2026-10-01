@@ -1,5 +1,5 @@
 // Service worker: guarda la app para usarla sin conexión. No intercepta nada fuera del sitio.
-const CACHE = 'corrector-v1';
+const CACHE = 'corrector-v2';
 const FILES = [
   './',
   'index.html',
@@ -9,6 +9,7 @@ const FILES = [
   'js/layout.js',
   'js/omr.js',
   'js/sheet.js',
+  'js/table.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',

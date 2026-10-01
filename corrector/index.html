@@ -33,6 +33,12 @@
         <input id="exam-title" type="text" maxlength="50" placeholder="Ej.: Microbiología General · 1er parcial">
       </label>
 
+      <fieldset>
+        <legend>Formato de la hoja de respuestas</legend>
+        <label><input type="radio" name="format" value="table" checked> Mi tabla impresa (N.º | a | b | c | d | e)</label>
+        <label><input type="radio" name="format" value="sheet"> Hoja generada por esta app</label>
+      </fieldset>
+
       <details class="help">
         <summary>¿Cómo se escribe la clave?</summary>
         <p>Una línea por ítem: <code>etiqueta opciones respuesta puntos</code></p>
@@ -40,8 +46,12 @@
 2     abcd   a   1
 12.1  abcde  ac  1   ← dos respuestas correctas
 15a   VF     V   1
-Tema  AB     -       ← "-" = se lee pero no puntúa</pre>
-        <p>Los ítems con distinta cantidad de opciones se acomodan solos en la hoja.</p>
+Tema  AB     -       ← "-" = se lee pero no puntúa
+10    -              ← fila de la tabla que no se corrige (desarrollo)</pre>
+        <p><strong>Tabla impresa:</strong> poné las filas en el mismo orden que en la hoja (primero la tabla de la
+          izquierda, de arriba hacia abajo, después la de la derecha), incluidas las de desarrollo con <code>-</code>.
+          Las opciones van en las columnas a, b, c… en ese orden.</p>
+        <p><strong>Hoja de la app:</strong> los ítems con distinta cantidad de opciones se acomodan solos.</p>
       </details>
 
       <div class="row">
@@ -73,6 +83,8 @@ Tema  AB     -       ← "-" = se lee pero no puntúa</pre>
 
     <!-- 2. Hoja imprimible -->
     <section id="tab-sheet" class="tab" hidden>
+      <p id="sheet-table-note" class="tips" hidden>Estás usando <strong>tu propia tabla impresa</strong>: no hace falta
+        imprimir esta hoja. Si querés, podés usarla como alternativa (elegí «Hoja generada por esta app» en Examen).</p>
       <p>Imprimí esta hoja (A4). Podés imprimir al 100 % o con «ajustar a página»: el lector compensa la escala.
         <strong>No modifiques los cuadrados negros.</strong></p>
       <div class="row">
@@ -85,17 +97,25 @@ Tema  AB     -       ← "-" = se lee pero no puntúa</pre>
     <!-- 3. Corregir -->
     <section id="tab-scan" class="tab" hidden>
       <div class="tips">
-        <strong>Para una buena foto:</strong> hoja apoyada sobre una mesa, que se vean los 4 cuadrados negros,
-        luz pareja y sin la sombra del teléfono encima.
+        <strong>Para una buena lectura:</strong> que se vea la tabla entera (o los 4 cuadrados negros),
+        luz pareja y sin la sombra del teléfono encima. No hace falta centrar ni enderezar.
       </div>
-      <label class="big-button">
-        📷 Sacar foto de una hoja
-        <input id="scan-input" type="file" accept="image/*" capture="environment" hidden>
-      </label>
-      <label class="link-button">
-        o elegir una imagen de la galería
-        <input id="scan-gallery" type="file" accept="image/*" hidden>
-      </label>
+      <button id="live-start" type="button" class="big-button">🎥 Corregir con la cámara</button>
+      <div id="live" class="live" hidden>
+        <video id="live-video" playsinline muted></video>
+        <p id="live-status" class="live-status">Buscando la tabla…</p>
+        <button id="live-stop" type="button" class="secondary">Cancelar</button>
+      </div>
+      <div class="row center">
+        <label class="link-button">
+          sacar una foto
+          <input id="scan-input" type="file" accept="image/*" capture="environment" hidden>
+        </label>
+        <label class="link-button">
+          elegir de la galería
+          <input id="scan-gallery" type="file" accept="image/*" hidden>
+        </label>
+      </div>
       <p id="scan-busy" class="busy" hidden>Procesando…</p>
       <p id="scan-error" class="error" hidden></p>
 

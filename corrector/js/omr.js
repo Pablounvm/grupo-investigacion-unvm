@@ -33,7 +33,7 @@ export function toGray({ data, width, height }) {
   return { w: width, h: height, g };
 }
 
-function integral(g, w, h) {
+export function integral(g, w, h) {
   const I = new Float64Array((w + 1) * (h + 1));
   for (let y = 0; y < h; y++) {
     let row = 0;
@@ -45,7 +45,7 @@ function integral(g, w, h) {
   return I;
 }
 
-function boxMean(I, w, h, x, y, r) {
+export function boxMean(I, w, h, x, y, r) {
   const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
   const x1 = Math.min(w, x + r + 1), y1 = Math.min(h, y + r + 1);
   const W = w + 1;
