@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#1f5f3f">
+  <title>Corrector de grillas</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Corrector de grillas</h1>
+    <p class="privacy">Todo se procesa en este dispositivo. Ninguna foto ni dato sale del teléfono.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="exam" aria-selected="true">1 · Examen</button>
+    <button role="tab" data-tab="sheet">2 · Hoja</button>
+    <button role="tab" data-tab="scan">3 · Corregir</button>
+    <button role="tab" data-tab="results">4 · Notas</button>
+  </nav>
+
+  <main>
+    <!-- 1. Configuración del examen y clave -->
+    <section id="tab-exam" class="tab">
+      <label>Nombre del examen
+        <input id="exam-title" type="text" maxlength="50" placeholder="Ej.: Microbiología General · 1er parcial">
+      </label>
+
+      <details class="help">
+        <summary>¿Cómo se escribe la clave?</summary>
+        <p>Una línea por ítem: <code>etiqueta opciones respuesta puntos</code></p>
+        <pre>1     abcde  b   1
+2     abcd   a   1
+12.1  abcde  ac  1   ← dos respuestas correctas
+15a   VF     V   1
+Tema  AB     -       ← "-" = se lee pero no puntúa</pre>
+        <p>Los ítems con distinta cantidad de opciones se acomodan solos en la hoja.</p>
+      </details>
+
+      <div class="row">
+        <label>Generar ítems
+          <input id="gen-n" type="number" min="1" max="80" value="20" inputmode="numeric">
+        </label>
+        <label>opciones
+          <input id="gen-opts" type="text" value="abcd" maxlength="6">
+        </label>
+        <button id="gen-btn" type="button" class="secondary">Generar</button>
+      </div>
+
+      <label>Clave (no se imprime nunca)
+        <textarea id="exam-key" rows="14" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+      </label>
+      <p id="exam-errors" class="error" hidden></p>
+
+      <fieldset class="scoring">
+        <legend>Puntaje</legend>
+        <label><input id="multi-partial" type="checkbox"> Ítems de varias respuestas: puntaje parcial proporcional</label>
+        <label>Descuento por respuesta incorrecta (puntos)
+          <input id="penalty" type="number" min="0" step="0.25" value="0" inputmode="decimal">
+        </label>
+      </fieldset>
+
+      <button id="exam-save" type="button">Guardar examen</button>
+      <p id="exam-status" class="ok" hidden></p>
+    </section>
+
+    <!-- 2. Hoja imprimible -->
+    <section id="tab-sheet" class="tab" hidden>
+      <p>Imprimí esta hoja (A4). Podés imprimir al 100 % o con «ajustar a página»: el lector compensa la escala.
+        <strong>No modifiques los cuadrados negros.</strong></p>
+      <div class="row">
+        <button id="sheet-print" type="button">Imprimir / PDF</button>
+        <button id="sheet-download" type="button" class="secondary">Descargar SVG</button>
+      </div>
+      <div id="sheet-preview" class="sheet-preview"></div>
+    </section>
+
+    <!-- 3. Corregir -->
+    <section id="tab-scan" class="tab" hidden>
+      <div class="tips">
+        <strong>Para una buena foto:</strong> hoja apoyada sobre una mesa, que se vean los 4 cuadrados negros,
+        luz pareja y sin la sombra del teléfono encima.
+      </div>
+      <label class="big-button">
+        📷 Sacar foto de una hoja
+        <input id="scan-input" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="link-button">
+        o elegir una imagen de la galería
+        <input id="scan-gallery" type="file" accept="image/*" hidden>
+      </label>
+      <p id="scan-busy" class="busy" hidden>Procesando…</p>
+      <p id="scan-error" class="error" hidden></p>
+
+      <div id="review" hidden>
+        <div class="summary">
+          <div id="score" class="score"></div>
+          <div id="review-count" class="review-count"></div>
+        </div>
+        <p class="legend">
+          <span class="sw ok"></span> correcta
+          <span class="sw bad"></span> incorrecta
+          <span class="sw rev"></span> revisar
+          <span class="sw key"></span> clave
+          — tocá un casillero para corregir la lectura.
+        </p>
+        <div class="canvas-wrap"><canvas id="review-canvas"></canvas></div>
+        <div id="review-list" class="review-list"></div>
+        <label>Estudiante (apellido y nombre)
+          <input id="student-name" type="text" maxlength="80" autocomplete="off">
+        </label>
+        <label>Legajo / DNI
+          <input id="student-id" type="text" maxlength="20" inputmode="numeric" autocomplete="off">
+        </label>
+        <div class="row">
+          <button id="save-result" type="button">Guardar y siguiente</button>
+          <button id="use-as-key" type="button" class="secondary">Usar como clave</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Resultados -->
+    <section id="tab-results" class="tab" hidden>
+      <div class="row">
+        <button id="export-csv" type="button">Exportar CSV</button>
+        <button id="clear-results" type="button" class="danger">Borrar todo</button>
+      </div>
+      <div id="stats" class="stats"></div>
+      <table class="results">
+        <thead><tr><th>Estudiante</th><th>Legajo</th><th>Puntaje</th><th>%</th><th>Corr. manuales</th><th></th></tr></thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="print-area" class="print-area"></div>
+</body>
+</html>

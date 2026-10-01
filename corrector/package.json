@@ -1,0 +1,8 @@
+{
+  "name": "corrector-grillas",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/synthetic.test.js 40"
+  }
+}
